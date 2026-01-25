@@ -148,10 +148,21 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 				return nil, err
 			}
 			fmt.Printf("Partition %s [CREATING]\n", p.Digest)
+
+			// Add stargz TOC digest annotation if available for lazy loading support
+			var annotations map[string]string
+			if p.TOCDigest != "" {
+				fmt.Printf("allotment is stargz")
+				annotations = map[string]string{
+					"containerd.io/snapshot/stargz/toc.digest": p.TOCDigest,
+				}
+			}
+
 			newLayers = append(newLayers, distribution.Descriptor{
-				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
-				Digest:    digest.Digest(fmt.Sprintf("sha256:%s", p.Digest)),
-				Size:      blob.Size,
+				MediaType:   "application/vnd.oci.image.layer.v1.tar+gzip",
+				Digest:      digest.Digest(fmt.Sprintf("sha256:%s", p.Digest)),
+				Size:        blob.Size,
+				Annotations: annotations,
 			})
 			config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, digest.Digest(fmt.Sprintf("sha256:%s", p.DiffID)))
 		}
