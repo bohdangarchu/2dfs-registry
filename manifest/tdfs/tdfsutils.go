@@ -24,6 +24,23 @@ type Partition struct {
 	y2 int
 }
 
+// AllotmentWithPrefetch wraps an Allotment with prefetch metadata
+type AllotmentWithPrefetch struct {
+	tdfsfilesystem.Allotment
+	ShouldPrefetch bool
+}
+
+// isInPartition checks if an allotment falls within any of the given partitions
+func isInPartition(allotment tdfsfilesystem.Allotment, partitions []Partition) bool {
+	for _, p := range partitions {
+		if allotment.Row >= p.x1 && allotment.Row <= p.x2 &&
+			allotment.Col >= p.y1 && allotment.Col <= p.y2 {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	//semantic tag partition init char
 	partitionInit = `--`
@@ -87,7 +104,7 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 
 	log.Default().Printf("Converting TDFS manifest to OCI manifest\n")
 	newLayers := []distribution.Descriptor{}
-	partitionAllotment := []tdfsfilesystem.Allotment{}
+	allAllotments := []AllotmentWithPrefetch{}
 	layerConfigBlob, err := blobService.Get(ctx, tdfsManifest.Config.Digest)
 	if err != nil {
 		log.Default().Printf("Error getting config %s\n", tdfsManifest.Config.Digest)
@@ -114,21 +131,46 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 				log.Default().Printf("Error unmarshalling layer %s\n", layer.Digest)
 				return nil, err
 			}
-			if len(partitionAllotment) == 0 {
+			// Only process if we haven't collected allotments yet
+			if len(allAllotments) == 0 {
 				log.Default().Printf("Adding field!!\n")
 				if field != nil {
+					// Use a map to track unique allotments by digest and their prefetch status
+					seenDigests := make(map[string]*AllotmentWithPrefetch)
+
 					for allotment := range field.IterateAllotments() {
-						//skip empty allotments
+						// Skip empty allotments
 						if allotment.Digest == "" {
 							continue
 						}
-						for _, p := range partitions {
-							if allotment.Row >= p.x1 && allotment.Row <= p.x2 && allotment.Col >= p.y1 && allotment.Col <= p.y2 {
-								log.Default().Printf("Added partition %d,%d,%d,%d \n", p.x1, p.y1, p.x2, p.y2)
-								partitionAllotment = append(partitionAllotment, allotment)
-								//TODO remove duplicated
+
+						// Check if allotment is already seen (deduplication)
+						if existing, ok := seenDigests[allotment.Digest]; ok {
+							// If already seen, just update prefetch status if this one matches partition
+							if !existing.ShouldPrefetch && isInPartition(allotment, partitions) {
+								existing.ShouldPrefetch = true
+								log.Default().Printf("Allotment %s marked for prefetch\n", allotment.Digest)
 							}
+							continue
 						}
+
+						// Determine if this allotment should have prefetch annotation
+						shouldPrefetch := isInPartition(allotment, partitions)
+
+						seenDigests[allotment.Digest] = &AllotmentWithPrefetch{
+							Allotment:      allotment,
+							ShouldPrefetch: shouldPrefetch,
+						}
+
+						if shouldPrefetch {
+							log.Default().Printf("Allotment %s at (%d,%d) matches partition, marked for prefetch\n",
+								allotment.Digest, allotment.Row, allotment.Col)
+						}
+					}
+
+					// Convert map to slice
+					for _, awp := range seenDigests {
+						allAllotments = append(allAllotments, *awp)
 					}
 				}
 			}
@@ -139,34 +181,45 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 	}
 
 	//create new layers
-	if len(partitionAllotment) > 0 {
-		//adding partitioned layers
-		for _, p := range partitionAllotment {
-			blob, err := blobService.Stat(ctx, digest.Digest(fmt.Sprintf("sha256:%s", p.Digest)))
+	if len(allAllotments) > 0 {
+		//adding allotment layers
+		for _, awp := range allAllotments {
+			blob, err := blobService.Stat(ctx, digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)))
 			if err != nil {
-				log.Default().Printf("Unable to find allotment %s\n", p.Digest)
+				log.Default().Printf("Unable to find allotment %s\n", awp.Digest)
 				return nil, err
 			}
-			fmt.Printf("Partition %s [CREATING]\n", p.Digest)
+			log.Default().Printf("Allotment %s [CREATING] (prefetch=%v)\n", awp.Digest, awp.ShouldPrefetch)
 
-			// Add stargz TOC digest annotation if available for lazy loading support
-			var annotations map[string]string
-			if p.TOCDigest != "" {
-				fmt.Printf("allotment is stargz")
-				annotations = map[string]string{
-					"containerd.io/snapshot/stargz/toc.digest": p.TOCDigest,
-				}
+			// Build annotations
+			annotations := map[string]string{}
+
+			// Add stargz TOC digest annotation if available
+			if awp.TOCDigest != "" {
+				annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
+			}
+
+			// Add prefetch annotation for partition-matching allotments
+			if awp.ShouldPrefetch {
+				annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blob.Size)
+				log.Default().Printf("Added prefetch annotation for allotment %s with size %d\n", awp.Digest, blob.Size)
+			}
+
+			// Only set annotations if we have any
+			var layerAnnotations map[string]string
+			if len(annotations) > 0 {
+				layerAnnotations = annotations
 			}
 
 			newLayers = append(newLayers, distribution.Descriptor{
 				MediaType:   "application/vnd.oci.image.layer.v1.tar+gzip",
-				Digest:      digest.Digest(fmt.Sprintf("sha256:%s", p.Digest)),
+				Digest:      digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)),
 				Size:        blob.Size,
-				Annotations: annotations,
+				Annotations: layerAnnotations,
 			})
-			config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, digest.Digest(fmt.Sprintf("sha256:%s", p.DiffID)))
+			config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, digest.Digest(fmt.Sprintf("sha256:%s", awp.DiffID)))
 		}
-		log.Default().Printf("Allotments added!\n")
+		log.Default().Printf("All allotments added! Total: %d\n", len(allAllotments))
 	}
 
 	newConfig, err := json.Marshal(config)
