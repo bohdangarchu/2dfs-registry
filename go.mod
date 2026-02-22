@@ -43,7 +43,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 )
 
-require github.com/2DFS/2dfs-builder v0.0.101
+require github.com/2DFS/2dfs-builder v0.0.0-20260222141604-bcd6f4552c0a
 
 require (
 	cel.dev/expr v0.16.1 // indirect
@@ -120,3 +120,5 @@ require (
 	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/2DFS/2dfs-builder => github.com/bohdangarchu/2dfs-builder v0.0.0-20260222141604-bcd6f4552c0a

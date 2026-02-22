@@ -21,7 +21,7 @@ http:
     debug:
         addr: :5001
         prometheus:
-            enabled: true
+            enabled: false
             path: /metrics
     headers:
         X-Content-Type-Options: [nosniff]
