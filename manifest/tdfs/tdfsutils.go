@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -101,45 +102,57 @@ func parsePartition(p string) (Partition, error) {
 }
 
 func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocischema.DeserializedManifest, blobService distribution.BlobService, partitions []Partition) (distribution.Manifest, error) {
+	const p = "[2DFS-TIMING]"
 
-	log.Default().Printf("Converting TDFS manifest to OCI manifest\n")
+	tTotal := time.Now()
+	log.Default().Printf("%s start convert manifest\n", p)
+
 	newLayers := []distribution.Descriptor{}
 	allAllotments := []AllotmentWithPrefetch{}
+
+	t := time.Now()
 	layerConfigBlob, err := blobService.Get(ctx, tdfsManifest.Config.Digest)
 	if err != nil {
-		log.Default().Printf("Error getting config %s\n", tdfsManifest.Config.Digest)
+		log.Default().Printf("%s error getting config %s\n", p, tdfsManifest.Config.Digest)
 		return nil, err
 	}
+	log.Default().Printf("%s config blob get: %s\n", p, time.Since(t))
+
+	t = time.Now()
 	var config v1.Image = v1.Image{}
 	err = json.Unmarshal(layerConfigBlob, &config)
 	if err != nil {
-		log.Default().Printf("Error unmarshalling config %s\n", tdfsManifest.Config.Digest)
+		log.Default().Printf("%s error unmarshalling config %s\n", p, tdfsManifest.Config.Digest)
 		return nil, err
 	}
+	log.Default().Printf("%s config unmarshal: %s\n", p, time.Since(t))
 
 	//select partitions
 	for _, layer := range tdfsManifest.Layers {
 		if layer.MediaType == MediaTypeTdfsLayer {
-			log.Default().Printf("Converting tdfs layer %s\n", layer.Digest)
+			t = time.Now()
 			layerContent, err := blobService.Get(ctx, layer.Digest)
 			if err != nil {
-				log.Default().Printf("Error getting layer %s\n", layer.Digest)
+				log.Default().Printf("%s error getting layer %s\n", p, layer.Digest)
 				return nil, err
 			}
+			log.Default().Printf("%s field blob get (%d bytes): %s\n", p, len(layerContent), time.Since(t))
+
+			t = time.Now()
 			field, err := tdfsfilesystem.GetField().Unmarshal(string(layerContent))
 			if err != nil {
-				log.Default().Printf("Error unmarshalling layer %s\n", layer.Digest)
+				log.Default().Printf("%s error unmarshalling layer %s\n", p, layer.Digest)
 				return nil, err
 			}
+			log.Default().Printf("%s field unmarshal: %s\n", p, time.Since(t))
+
 			// Only process if we haven't collected allotments yet
 			if len(allAllotments) == 0 {
-				log.Default().Printf("Adding field!!\n")
 				if field != nil {
-					// Use a map to track unique allotments by digest and their prefetch status
 					seenDigests := make(map[string]*AllotmentWithPrefetch)
 
+					t = time.Now()
 					for allotment := range field.IterateAllotments() {
-						// Skip empty allotments
 						if allotment.Digest == "" {
 							continue
 						}
@@ -150,16 +163,12 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 						// them at the manifest level — only include if they match the partition.
 						// Stargz allotments are always included; the runtime handles lazy loading.
 						if allotment.TOCDigest == "" && !inPartition {
-							log.Default().Printf("Skipping non-stargz allotment %s (not in partition)\n", allotment.Digest)
 							continue
 						}
 
-						// Check if allotment is already seen (deduplication)
 						if existing, ok := seenDigests[allotment.Digest]; ok {
-							// If already seen, just update prefetch status if this one matches partition
 							if !existing.ShouldPrefetch && inPartition {
 								existing.ShouldPrefetch = true
-								log.Default().Printf("Allotment %s marked for prefetch\n", allotment.Digest)
 							}
 							continue
 						}
@@ -168,51 +177,39 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 							Allotment:      allotment,
 							ShouldPrefetch: inPartition,
 						}
-
-						if inPartition {
-							log.Default().Printf("Allotment %s at (%d,%d) matches partition, marked for prefetch\n",
-								allotment.Digest, allotment.Row, allotment.Col)
-						}
 					}
+					log.Default().Printf("%s iterate allotments (%d unique): %s\n", p, len(seenDigests), time.Since(t))
 
-					// Convert map to slice
 					for _, awp := range seenDigests {
 						allAllotments = append(allAllotments, *awp)
 					}
 				}
 			}
 		} else {
-			log.Default().Printf("Appended layer %s\n", layer.Digest)
 			newLayers = append(newLayers, layer)
 		}
 	}
 
 	//create new layers
 	if len(allAllotments) > 0 {
-		//adding allotment layers
+		t = time.Now()
 		for _, awp := range allAllotments {
+			tStat := time.Now()
 			blob, err := blobService.Stat(ctx, digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)))
 			if err != nil {
-				log.Default().Printf("Unable to find allotment %s\n", awp.Digest)
+				log.Default().Printf("%s unable to find allotment %s\n", p, awp.Digest)
 				return nil, err
 			}
-			log.Default().Printf("Allotment %s [CREATING] (prefetch=%v)\n", awp.Digest, awp.ShouldPrefetch)
+			log.Default().Printf("%s allotment stat %s: %s\n", p, awp.Digest[:12], time.Since(tStat))
 
-			// Build annotations
 			annotations := map[string]string{}
-
-			// Add stargz TOC digest annotation if available
 			if awp.TOCDigest != "" {
 				annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
 			}
-
-			// Add prefetch annotation for partition-matching allotments
 			if awp.ShouldPrefetch {
 				annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blob.Size)
-				log.Default().Printf("Added prefetch annotation for allotment %s with size %d\n", awp.Digest, blob.Size)
 			}
 
-			// Only set annotations if we have any
 			var layerAnnotations map[string]string
 			if len(annotations) > 0 {
 				layerAnnotations = annotations
@@ -226,29 +223,35 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 			})
 			config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, digest.Digest(fmt.Sprintf("sha256:%s", awp.DiffID)))
 		}
-		log.Default().Printf("All allotments added! Total: %d\n", len(allAllotments))
+		log.Default().Printf("%s all stat calls (%d allotments): %s\n", p, len(allAllotments), time.Since(t))
 	}
 
+	t = time.Now()
 	newConfig, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
 	}
+	log.Default().Printf("%s config marshal: %s\n", p, time.Since(t))
 
-	//create new manifest
+	t = time.Now()
 	manifestBuilder := ocischema.NewManifestBuilder(blobService, newConfig, tdfsManifest.Annotations)
 	err = manifestBuilder.SetMediaType(v1.MediaTypeImageManifest)
 	if err != nil {
-		log.Default().Printf("Error setting media type %s\n", v1.MediaTypeImageManifest)
+		log.Default().Printf("%s error setting media type %s\n", p, v1.MediaTypeImageManifest)
 		return nil, err
 	}
 	for _, layer := range newLayers {
 		err := manifestBuilder.AppendReference(layer)
 		if err != nil {
-			log.Default().Printf("Error appending layer %s\n", layer.Digest)
+			log.Default().Printf("%s error appending layer %s\n", p, layer.Digest)
 			return nil, err
 		}
 	}
-	return manifestBuilder.Build(ctx)
+	manifest, err := manifestBuilder.Build(ctx)
+	log.Default().Printf("%s manifest build: %s\n", p, time.Since(t))
+
+	log.Default().Printf("%s total convert: %s\n", p, time.Since(tTotal))
+	return manifest, err
 }
 
 func ConvertPartitionedIndexToOciIndex(tdfsManifest *ocischema.DeserializedImageIndex) ([]byte, error) {
