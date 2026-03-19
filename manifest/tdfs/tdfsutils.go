@@ -101,7 +101,7 @@ func parsePartition(p string) (Partition, error) {
 	return result, nil
 }
 
-func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocischema.DeserializedManifest, blobService distribution.BlobService, partitions []Partition) (distribution.Manifest, error) {
+func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocischema.DeserializedManifest, blobService distribution.BlobService, partitions []Partition, stargzSupport bool) (distribution.Manifest, error) {
 	const p = "[2DFS-TIMING]"
 
 	tTotal := time.Now()
@@ -159,15 +159,22 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 
 						inPartition := isInPartition(allotment, partitions)
 
-						// Non-stargz allotments have no lazy loading mechanism, so filter
-						// them at the manifest level — only include if they match the partition.
-						// Stargz allotments are always included; the runtime handles lazy loading.
-						if allotment.TOCDigest == "" && !inPartition {
-							continue
+						if stargzSupport {
+							// Non-stargz allotments have no lazy loading mechanism, so filter
+							// them at the manifest level — only include if they match the partition.
+							// Stargz allotments are always included; the runtime handles lazy loading.
+							if allotment.TOCDigest == "" && !inPartition {
+								continue
+							}
+						} else {
+							// Standard behavior: only include allotments that match the partition.
+							if !inPartition {
+								continue
+							}
 						}
 
 						if existing, ok := seenDigests[allotment.Digest]; ok {
-							if !existing.ShouldPrefetch && inPartition {
+							if stargzSupport && !existing.ShouldPrefetch && inPartition {
 								existing.ShouldPrefetch = true
 							}
 							continue
@@ -175,7 +182,7 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 
 						seenDigests[allotment.Digest] = &AllotmentWithPrefetch{
 							Allotment:      allotment,
-							ShouldPrefetch: inPartition,
+							ShouldPrefetch: stargzSupport && inPartition,
 						}
 					}
 					log.Default().Printf("%s iterate allotments (%d unique): %s\n", p, len(seenDigests), time.Since(t))
@@ -202,17 +209,18 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 			}
 			log.Default().Printf("%s allotment stat %s: %s\n", p, awp.Digest[:12], time.Since(tStat))
 
-			annotations := map[string]string{}
-			if awp.TOCDigest != "" {
-				annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
-			}
-			if awp.ShouldPrefetch {
-				annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blob.Size)
-			}
-
 			var layerAnnotations map[string]string
-			if len(annotations) > 0 {
-				layerAnnotations = annotations
+			if stargzSupport {
+				annotations := map[string]string{}
+				if awp.TOCDigest != "" {
+					annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
+				}
+				if awp.ShouldPrefetch {
+					annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blob.Size)
+				}
+				if len(annotations) > 0 {
+					layerAnnotations = annotations
+				}
 			}
 
 			newLayers = append(newLayers, distribution.Descriptor{

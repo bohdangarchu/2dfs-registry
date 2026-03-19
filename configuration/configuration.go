@@ -68,6 +68,17 @@ type Configuration struct {
 
 	// Policy configures registry policy options.
 	Policy Policy `yaml:"policy,omitempty"`
+
+	// Tdfs configures 2DFS-specific options.
+	Tdfs Tdfs `yaml:"tdfs,omitempty"`
+}
+
+// Tdfs configures 2DFS-specific registry behavior.
+type Tdfs struct {
+	// StargzSupport enables stargz layer annotations (TOC digest and prefetch)
+	// during manifest partitioning. When false, the registry reverts to standard
+	// partition filtering with no layer annotations.
+	StargzSupport bool `yaml:"stargzsupport,omitempty"`
 }
 
 // Policy defines configuration options for managing registry policies.

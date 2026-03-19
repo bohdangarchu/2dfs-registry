@@ -244,7 +244,7 @@ func (imh *manifestHandler) GetManifest(w http.ResponseWriter, r *http.Request) 
 
 			if ociSubManifest, isOci := submanifest.(*ocischema.DeserializedManifest); isOci {
 
-				partitioned, err := tdfs.ConvertTdfsManifestToOciManifest(imh, ociSubManifest, blobstore, imh.Partitions)
+				partitioned, err := tdfs.ConvertTdfsManifestToOciManifest(imh, ociSubManifest, blobstore, imh.Partitions, imh.App.Config.Tdfs.StargzSupport)
 				if err != nil {
 					imh.Errors = append(imh.Errors, errcode.ErrorCodeUnknown.WithDetail(err))
 					return
