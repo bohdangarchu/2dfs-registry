@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -187,8 +188,13 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 					}
 					log.Default().Printf("%s iterate allotments (%d unique): %s\n", p, len(seenDigests), time.Since(t))
 
-					for _, awp := range seenDigests {
-						allAllotments = append(allAllotments, *awp)
+					keys := make([]string, 0, len(seenDigests))
+					for k := range seenDigests {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+					for _, k := range keys {
+						allAllotments = append(allAllotments, *seenDigests[k])
 					}
 				}
 			}
