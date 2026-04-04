@@ -32,3 +32,4 @@ health:
     threshold: 3
 tdfs:
   stargzsupport: true
+  prefetchsupport: false

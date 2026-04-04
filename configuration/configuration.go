@@ -79,6 +79,11 @@ type Tdfs struct {
 	// during manifest partitioning. When false, the registry reverts to standard
 	// partition filtering with no layer annotations.
 	StargzSupport bool `yaml:"stargzsupport,omitempty"`
+	// PrefetchSupport enables the containerd.io/snapshot/remote/stargz.prefetch
+	// annotation on in-partition stargz layers. Requires StargzSupport to be true.
+	// When false, all stargz layers are included with only the TOC digest annotation;
+	// partition-based selection is skipped for stargz layers.
+	PrefetchSupport bool `yaml:"prefetchsupport,omitempty"`
 }
 
 // Policy defines configuration options for managing registry policies.
