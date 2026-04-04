@@ -121,4 +121,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/2DFS/2dfs-builder => github.com/bohdangarchu/2dfs-builder v0.0.0-20260222141604-bcd6f4552c0a
+replace github.com/2DFS/2dfs-builder => github.com/bohdangarchu/2dfs-builder v0.0.0-20260404152110-28f990f13de6

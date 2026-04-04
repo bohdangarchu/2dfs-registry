@@ -163,7 +163,7 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 						if stargzSupport {
 							// Stargz layers are always included; the runtime handles lazy loading.
 							// Non-stargz allotments have no lazy loading, so filter by partition.
-							if allotment.TOCDigest == "" && !inPartition {
+							if allotment.Compression == "" && !inPartition {
 								continue
 							}
 						} else {
@@ -228,8 +228,12 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 				}
 			}
 
+			mediaType := v1.MediaTypeImageLayerGzip
+			if awp.Compression == "zstd" {
+				mediaType = v1.MediaTypeImageLayerZstd
+			}
 			newLayers = append(newLayers, distribution.Descriptor{
-				MediaType:   "application/vnd.oci.image.layer.v1.tar+gzip",
+				MediaType:   mediaType,
 				Digest:      digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)),
 				Size:        blob.Size,
 				Annotations: layerAnnotations,

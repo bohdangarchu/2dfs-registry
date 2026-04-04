@@ -13,7 +13,7 @@ type Allotment struct {
 	DiffID           string `json:"diffid"`
 	TOCDigest        string `json:"tocDigest,omitempty"`
 	UncompressedSize int64  `json:"uncompressedSize,omitempty"`
-	IsStargz         bool   `json:"isStargz,omitempty"`
+	Compression      string `json:"compression,omitempty"`
 }
 
 type Cols struct {
