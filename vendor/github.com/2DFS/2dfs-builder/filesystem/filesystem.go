@@ -20,8 +20,8 @@ func (f *TwoDFilesystem) AddAllotment(allotment Allotment) Field {
 	f.Rows[allotment.Row].Allotments[allotment.Col].Digest = allotment.Digest
 	f.Rows[allotment.Row].Allotments[allotment.Col].DiffID = allotment.DiffID
 	f.Rows[allotment.Row].Allotments[allotment.Col].TOCDigest = allotment.TOCDigest
-	f.Rows[allotment.Row].Allotments[allotment.Col].UncompressedSize = allotment.UncompressedSize
 	f.Rows[allotment.Row].Allotments[allotment.Col].Compression = allotment.Compression
+	f.Rows[allotment.Row].Allotments[allotment.Col].CompressedSize = allotment.CompressedSize
 	return f
 }
 

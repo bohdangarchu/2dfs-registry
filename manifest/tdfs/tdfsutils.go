@@ -206,13 +206,20 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 	if len(allAllotments) > 0 {
 		t = time.Now()
 		for _, awp := range allAllotments {
-			tStat := time.Now()
-			blob, err := blobService.Stat(ctx, digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)))
-			if err != nil {
-				log.Default().Printf("%s unable to find allotment %s\n", p, awp.Digest)
-				return nil, err
+			var blobSize int64
+			if awp.CompressedSize > 0 {
+				blobSize = awp.CompressedSize
+			} else {
+				// Fallback for manifests without Size stored in allotments
+				tStat := time.Now()
+				blob, err := blobService.Stat(ctx, digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)))
+				if err != nil {
+					log.Default().Printf("%s unable to find allotment %s\n", p, awp.Digest)
+					return nil, err
+				}
+				log.Default().Printf("%s allotment stat %s: %s\n", p, awp.Digest[:12], time.Since(tStat))
+				blobSize = blob.Size
 			}
-			log.Default().Printf("%s allotment stat %s: %s\n", p, awp.Digest[:12], time.Since(tStat))
 
 			var layerAnnotations map[string]string
 			if stargzSupport {
@@ -221,7 +228,7 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 					annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
 				}
 				if prefetchSupport && awp.ShouldPrefetch {
-					annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blob.Size)
+					annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blobSize)
 				}
 				if len(annotations) > 0 {
 					layerAnnotations = annotations
@@ -235,12 +242,12 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 			newLayers = append(newLayers, distribution.Descriptor{
 				MediaType:   mediaType,
 				Digest:      digest.Digest(fmt.Sprintf("sha256:%s", awp.Digest)),
-				Size:        blob.Size,
+				Size:        blobSize,
 				Annotations: layerAnnotations,
 			})
 			config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, digest.Digest(fmt.Sprintf("sha256:%s", awp.DiffID)))
 		}
-		log.Default().Printf("%s all stat calls (%d allotments): %s\n", p, len(allAllotments), time.Since(t))
+		log.Default().Printf("%s build descriptors (%d allotments): %s\n", p, len(allAllotments), time.Since(t))
 	}
 
 	t = time.Now()
