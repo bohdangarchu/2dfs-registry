@@ -227,8 +227,12 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 				if awp.TOCDigest != "" {
 					annotations["containerd.io/snapshot/stargz/toc.digest"] = awp.TOCDigest
 				}
-				if prefetchSupport && awp.ShouldPrefetch {
-					annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blobSize)
+				if prefetchSupport {
+					if awp.ShouldPrefetch {
+						annotations["containerd.io/snapshot/remote/stargz.prefetch"] = fmt.Sprintf("%d", blobSize)
+					} else {
+						annotations["containerd.io/snapshot/remote/stargz.prefetch"] = "0"
+					}
 				}
 				if len(annotations) > 0 {
 					layerAnnotations = annotations
