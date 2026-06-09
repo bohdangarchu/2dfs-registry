@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -150,7 +149,11 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 			// Only process if we haven't collected allotments yet
 			if len(allAllotments) == 0 {
 				if field != nil {
+					// Map dedups identical-content allotments, ordered preserves
+					// col (2dfs.json) order so each allotment keeps a stable layer
+					// index across content changes.
 					seenDigests := make(map[string]*AllotmentWithPrefetch)
+					ordered := make([]*AllotmentWithPrefetch, 0)
 
 					t = time.Now()
 					for allotment := range field.IterateAllotments() {
@@ -180,20 +183,17 @@ func ConvertTdfsManifestToOciManifest(ctx context.Context, tdfsManifest *ocische
 							continue
 						}
 
-						seenDigests[allotment.Digest] = &AllotmentWithPrefetch{
+						awp := &AllotmentWithPrefetch{
 							Allotment:      allotment,
 							ShouldPrefetch: stargzSupport && prefetchSupport && inPartition,
 						}
+						seenDigests[allotment.Digest] = awp
+						ordered = append(ordered, awp)
 					}
 					log.Default().Printf("%s iterate allotments (%d unique): %s\n", p, len(seenDigests), time.Since(t))
 
-					keys := make([]string, 0, len(seenDigests))
-					for k := range seenDigests {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-					for _, k := range keys {
-						allAllotments = append(allAllotments, *seenDigests[k])
+					for _, awp := range ordered {
+						allAllotments = append(allAllotments, *awp)
 					}
 				}
 			}
