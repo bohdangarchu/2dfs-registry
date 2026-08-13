@@ -1,6 +1,6 @@
 module github.com/2DFS/2dfs-registry/v3
 
-go 1.23.7
+go 1.25.0
 
 require (
 	cloud.google.com/go/storage v1.45.0
@@ -20,7 +20,7 @@ require (
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.5
-	github.com/klauspost/compress v1.17.11
+	github.com/klauspost/compress v1.18.5
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
@@ -38,7 +38,7 @@ require (
 	golang.org/x/crypto v0.36.0
 	golang.org/x/net v0.38.0
 	golang.org/x/oauth2 v0.28.0
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.19.0
 	google.golang.org/api v0.197.0
 	gopkg.in/yaml.v2 v2.4.0
 )
@@ -121,4 +121,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/2DFS/2dfs-builder => github.com/bohdangarchu/2dfs-builder v0.0.0-20260404152110-28f990f13de6
+replace github.com/2DFS/2dfs-builder => github.com/mitrafsnap/2dfs-builder v0.0.0-20260813080219-0e12c9e98b48
